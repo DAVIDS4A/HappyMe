@@ -3,14 +3,50 @@ from PIL import Image
 import pandas as pd
 import os
 import datetime
+import base64
 
 # Set page title and favicon
 st.set_page_config(page_title="HappyMe", page_icon=":smiley:")
 
-# Header
-st.title("HappyMe :)")
-st.header("Welcome to HappyMe! This web app encourages regular breaks for reduced eye strain and improved sleep.")
+@st.cache_data
+def get_base64_of_bin_file(bin_file):
+    with open(bin_file, 'rb') as f:
+        data = f.read()
+    return base64.b64encode(data).decode()
 
+def set_png_as_page_bg(png_file):
+    bin_str = get_base64_of_bin_file(png_file)
+    page_bg_img = '''
+    <style>
+    [data-testid="stAppViewContainer"] {
+    background-image: url("data:image/png;base64,%s");
+    background-size: cover;
+    }
+    [data-testid="stHeader"]{
+        background-color: rgba(0 ,0 ,0 ,0);
+     }
+    [data-testid="stToolbar"]{
+        right: 2rem;
+    }
+    [data-testid="stSidebar"]{
+        background-position: center;
+        background-image: linear-gradient(to right, rgba(182, 182, 241, 1), rgba(241, 182, 182, 1));
+     }
+    </style>
+    ''' % bin_str
+
+    st.markdown(page_bg_img, unsafe_allow_html=True)
+
+#set_png_as_page_bg('background.png')
+# Header
+st.markdown("<h1 style='text-align: center;'>HappyMe</h1>", unsafe_allow_html=True)
+st.markdown("<h3 style='text-align: center;'>Your digital companion for a healthier digital lifestyle.</h3>", unsafe_allow_html=True)
+
+# Add separator
+st.markdown("---")
+
+# Add space
+st.markdown("<br>", unsafe_allow_html=True)
 # Load external CSS
 def load_css(file_path):
     with open(file_path, 'r') as f:
@@ -21,10 +57,8 @@ def load_css(file_path):
 load_css('styles.css')
 
 # Smiley face logo (using a local image file)
-smiley_image_path = "happy.png"  # Replace with the actual path to your smiley face image
+smiley_image_path = "logo.png"  # Replace with the actual path to your smiley face image
 smiley_image = Image.open(smiley_image_path)
-
-st.sidebar.image(smiley_image, caption="HappyMe", use_column_width=False, width=100)
 
 # Create an empty DataFrame for profiles
 profiles_file = 'profiles.csv'
@@ -40,10 +74,13 @@ selected_page = st.sidebar.radio("Navigation", ["Profile", "Dashboard", "History
 if selected_page == "Profile":
     st.subheader("Profile Customization")
     user_name = st.text_input("Enter Your Name", key="name")
-    user_email = st.text_input("Enter Your Email", key="email")
+    user_birthday = st.date_input("Enter Your Birthday", key="birthday",min_value=pd.to_datetime("1960-01-01"),max_value=pd.to_datetime("today"), format="YYYY-MM-DD")
     user_picture = st.file_uploader("Upload Your Profile Picture", type=["jpg", "jpeg", "png"])
 
-    st.write(f"Email: {user_email}")
+    if user_birthday is not None:
+        formatted_birthday = user_birthday.strftime('%Y-%m-%d')
+        st.write(f"Birthday: {formatted_birthday}")
+         
     # Display user's name
     st.title(f"Hello, {user_name}!")
 
@@ -56,7 +93,7 @@ if selected_page == "Profile":
     # Save the user's data to a DataFrame or database
     if st.button("Save Profile"):
         # Assuming you have a DataFrame called 'user_data'
-        user_data = pd.DataFrame({"Name": [user_name]})
+        user_data = pd.DataFrame({"Name": [user_name],"Birthday": [formatted_birthday]})
 
         # Additional data fields can be added here
 
