@@ -1,169 +1,288 @@
-import streamlit as st
-from PIL import Image
-import pandas as pd
+import json
 import os
-import datetime
-import base64
+import pickle
+from datetime import datetime
+import warnings
 
-# Set page title and favicon
-st.set_page_config(page_title="HappyMe", page_icon=":smiley:")
+#import openai
+import pandas as pd
+import requests
+import streamlit as st
 
-@st.cache_data
-def get_base64_of_bin_file(bin_file):
-    with open(bin_file, 'rb') as f:
-        data = f.read()
-    return base64.b64encode(data).decode()
 
-def set_png_as_page_bg(png_file):
-    bin_str = get_base64_of_bin_file(png_file)
-    page_bg_img = '''
-    <style>
-    [data-testid="stAppViewContainer"] {
-    background-image: url("data:image/png;base64,%s");
-    background-size: cover;
-    }
-    [data-testid="stHeader"]{
-        background-color: rgba(0 ,0 ,0 ,0);
-     }
-    [data-testid="stToolbar"]{
-        right: 2rem;
-    }
-    [data-testid="stSidebar"]{
-        background-position: center;
-        background-image: linear-gradient(to right, rgba(182, 182, 241, 1), rgba(241, 182, 182, 1));
-     }
-    </style>
-    ''' % bin_str
+def register_user(uploaded_file, name, dob, email, password):
+  # Check if email already exists in CSV
+  existing_users = pd.read_csv('user_data.csv')
+  existing_emails = existing_users['Email'].tolist()
+  if email in existing_emails:
+    st.error("Email address already registered.")
+    return False
 
-    st.markdown(page_bg_img, unsafe_allow_html=True)
+  # Validate input and save user information to CSV
+  if not uploaded_file:
+    st.error("Please upload a profile photo.")
+    return False
 
-#set_png_as_page_bg('background.png')
-# Header
-st.markdown("<h1 style='text-align: center;'>HappyMe</h1>", unsafe_allow_html=True)
-st.markdown("<h3 style='text-align: center;'>Your digital companion for a healthier digital lifestyle.</h3>", unsafe_allow_html=True)
+  if not name or not dob or not email or not password:
+    st.error("Please fill in all required fields.")
+    return False
 
-# Add separator
-st.markdown("---")
+  if not is_valid_email(email):
+    st.error("Please enter a valid email address.")
+    return False
 
-# Add space
-st.markdown("<br>", unsafe_allow_html=True)
-# Load external CSS
-def load_css(file_path):
-    with open(file_path, 'r') as f:
-        css = f.read()
-    st.markdown(f'<style>{css}</style>', unsafe_allow_html=True)
+  if len(password) < 8:
+    st.error("Password must be at least 8 characters long.")
+    return False
 
-# Load external CSS file
-load_css('styles.css')
+  # Save uploaded photo to a permanent location
+  photo_filename = f"{email}.jpg"
+  with open(photo_filename, 'wb') as f:
+    f.write(uploaded_file.read())
 
-# Smiley face logo (using a local image file)
-smiley_image_path = "logo.png"  # Replace with the actual path to your smiley face image
-smiley_image = Image.open(smiley_image_path)
+  # Save user information to CSV
+  user_data = {
+      'Photo': photo_filename,
+      'Name': name,
+      'DOB': dob,
+      'Email': email,
+      'Password': password
+  }
 
-# Create an empty DataFrame for profiles
-profiles_file = 'profiles.csv'
-if os.path.exists(profiles_file):
-    profiles = pd.read_csv(profiles_file)
-else:
-    profiles = pd.DataFrame(columns=["Name", "Gender", "Age"])
+  df = pd.DataFrame([user_data])
+  df.to_csv('user_data.csv', mode='a', header=False, index=False)
 
-# Sidebar buttons
-selected_page = st.sidebar.radio("Navigation", ["Profile", "Dashboard", "History"])
+  st.success('Registration successful!')
+  return True
 
-# Profile page
-if selected_page == "Profile":
-    st.subheader("Profile Customization")
-    user_name = st.text_input("Enter Your Name", key="name")
-    user_birthday = st.date_input("Enter Your Birthday", key="birthday",min_value=pd.to_datetime("1960-01-01"),max_value=pd.to_datetime("today"), format="YYYY-MM-DD")
-    user_picture = st.file_uploader("Upload Your Profile Picture", type=["jpg", "jpeg", "png"])
 
-    if user_birthday is not None:
-        formatted_birthday = user_birthday.strftime('%Y-%m-%d')
-        st.write(f"Birthday: {formatted_birthday}")
-         
-    # Display user's name
-    st.title(f"Hello, {user_name}!")
+def verify_user(email, password):
+  # Check if email exists in CSV
+  existing_users = pd.read_csv('user_data.csv')
+  existing_emails = existing_users['Email'].tolist()
+  if email not in existing_emails:
+    st.error("Incorrect email address.")
+    return False
 
-    # Display user's profile picture if uploaded
-    if user_picture is not None:
-        st.image(user_picture, caption="Your Profile Picture", use_column_width=True)
+  # Verify password using data from CSV
+  user_data = existing_users[existing_users['Email'] == email]
+  if password != user_data['Password'].values[0]:
+    st.error('Incorrect password.')
+    return False
 
-    # Additional user input fields or functionalities can be added here
+  # Set session variable to indicate successful login
+  st.session_state['logged_in'] = True
+  return True
 
-    # Save the user's data to a DataFrame or database
-    if st.button("Save Profile"):
-        # Assuming you have a DataFrame called 'user_data'
-        user_data = pd.DataFrame({"Name": [user_name],"Birthday": [formatted_birthday]})
 
-        # Additional data fields can be added here
+def is_valid_email(email):
+  regex = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z]+$'
+  return re.match(regex, email)
 
-        # Save the data to a CSV file or database
-        user_data.to_csv("user_data.csv", index=False)
-        st.success("Profile saved successfully!")
 
-# Dashboard page
-elif selected_page == "Dashboard":
-    with st.form(key='my_form'):
-        user_name = st.text_input("Enter Your Name")
-        user_age = st.number_input("Enter Your Age", min_value=1, max_value=120)
-        user_gender = st.selectbox("Select Your Gender", ["Male", "Female"])
+# Function to preprocess TSSM (Time Spent on Social Media)
+def preprocess_TSSM(TSSM):
+  min_TSSM = 0  # Replace with the minimum TSSM value in your dataset
+  max_TSSM = 10  # Replace with the maximum TSSM value in your dataset
+  normalized_TSSM = (TSSM - min_TSSM) / (max_TSSM - min_TSSM)
+  return normalized_TSSM
 
-        # Every form must have a submit button.
-        submitted = st.form_submit_button("Save Profile")
 
-    # Update profiles DataFrame and save to CSV
-    if submitted:
-        if user_name and user_gender and user_age:
-            new_profile = pd.DataFrame({"Name": [user_name], "Gender": [user_gender], "Age": [user_age]})
-            profiles = pd.concat([profiles, new_profile], ignore_index=True)
-            # Save the profiles to a CSV file
-            profiles.to_csv(profiles_file, index=False)
-            st.success("Profile created/updated successfully!")
-        else:
-            st.warning("Please fill in all the required information.")
-    st.subheader("Dashboard")
-    with st.form(key='my_form1'):
-        screen_time = st.number_input("Enter Your Screen Time (in hours per day)", min_value=0, max_value=24, value=0)
-        submit_button = st.form_submit_button(label='Check')
-        advice = ""  # Initialize advice variable
-        risk = ""  # Initialize risk variable
-        if submit_button:
-            # Generate advice based on screen time
-            if screen_time > 6:
-                advice = "High screen time! Consider taking breaks and reducing screen time for better well-being."
-                st.warning(advice)
-            else:
-                advice = "Good job on managing screen time! Remember to take breaks for eye health."
-                st.success(advice)
+# Function to calculate Age from Date of Birth (DOB)
+def calculate_age_from_DOB(DOB):
+  birth_date = datetime.strptime(DOB, '%Y-%m-%d')
+  current_date = datetime.now()
+  age = current_date.year - birth_date.year - (
+      (current_date.month, current_date.day) <
+      (birth_date.month, birth_date.day))
+  return age
 
-            # Assess risk of depression based on screen time
-            if screen_time > 8:
-                risk = "High risk of depression! Please consider reducing screen time and seeking professional advice."
-                st.error(risk)
-            else:
-                risk = "Low risk of depression. Keep up the good habits."
-                st.info(risk)
 
-            # Get current date
-            current_date = datetime.datetime.now().strftime("%Y-%m-%d")
+# Function to make prediction using XGBoost model
+def make_prediction(TSSM, DOB):
+  normalized_TSSM = preprocess_TSSM(TSSM)
+  age = calculate_age_from_DOB(DOB)
+  with open('xgboost_model.pkl', 'rb') as file:
+    xgb_model = pickle.load(file)
+  prediction = xgb_model.predict([[normalized_TSSM, age]])
+  return prediction[0]
 
-            # Update profiles DataFrame and save to CSV
-            new_profile = pd.DataFrame({"Name": [user_name], "Gender": [user_gender], "Age": [user_age], "Screen Time": [screen_time], "Advice": [advice], "Risk": [risk], "Date": [current_date]})
-            profiles = pd.concat([profiles, new_profile], ignore_index=True)
-            profiles.to_csv(profiles_file, index=False)
 
-# History page
-elif selected_page == "History":
-    st.subheader("History")
-    # Load external data from the CSV file
-    external_data = pd.read_csv("profiles.csv")
+# Function to generate advice using GPT-3.5-turbo API
 
-    # Display the table with specific columns
-    st.table(external_data[['Date', 'Advice', 'Risk']])
 
-# Footer
-st.markdown("---")
-st.write("HappyMe - Your Digital Well-being Companion")
+def generate_advice(prediction):
+  # Open AI API key
+  openai_api_key = "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"
 
-# Privacy statement
-st.markdown("Privacy: HappyMe securely stores user data in compliance with relevant laws.")
+  if prediction is not None:
+    pass
+  else:
+    pass
+
+  prompt = f"Provide advice for user to help them manage their mental health.Based ontheir social media usage, it is has been founnd they at this level of risk of depression ${prediction:.2f} for their monthly expenses. Please offer a one sentence advice of not more than 7 words on how they can relax their mind ."
+
+  openai_endpoint = "https://api.openai.com/v1/chat/completions"
+  headers = {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer {}".format(openai_api_key)
+  }
+
+  data = {
+      "model": "gpt-3.5-turbo",
+      "messages": [{
+          "role": "user",
+          "content": prompt
+      }]
+  }
+
+  response = requests.post(openai_endpoint, headers=headers, json=data)
+  response_data = json.loads(response.text)
+
+  advice = response_data["choices"][0]["message"]["content"]
+  return advice
+
+
+# Initialize session variable for login status
+st.session_state['logged_in'] = False
+
+# Load existing user data from CSV file
+with warnings.catch_warnings(record=True):
+  existing_users = pd.read_csv('user_data.csv')
+  existing_emails = existing_users['Email'].tolist()
+
+# Define the filename for the Users CSV
+users_file = 'user_data.csv'
+
+# Sidebar navigation
+st.sidebar.title('HappyMe')
+selected_page = st.sidebar.radio('Navigation', ['Signup', 'Signin', 'Profile'])
+
+# Signup screen
+if selected_page == 'Signup':
+  st.title('Signup')
+
+  # Upload profile photo
+  uploaded_file = st.file_uploader('Select a profile photo')
+  if uploaded_file is not None:
+    # Save uploaded photo to a temporary location
+    with open('temp_photo.jpg', 'wb') as f:
+      f.write(uploaded_file.read())
+
+  # Collect user information
+  name = st.text_input('Name:')
+  dob = st.date_input('Date of Birth:')
+  email = st.text_input('Email:')
+  password = st.text_input('Password:', type='password')
+
+  # Submit signup form
+  if st.button('Signup'):
+    # Validate and save user registration
+    if register_user(uploaded_file, name, dob, email, password):
+      st.success('Registration successful!')
+      st.session_state['logged_in'] = True
+      selected_page = 'Profile'
+
+# Signin screen
+elif selected_page == 'Signin':
+  st.title('Signin')
+
+  email = st.text_input('Email:')
+  password = st.text_input('Password:', type='password')
+
+  # Submit signin form
+  if st.button('Signin'):
+    if verify_user(email, password):
+      st.success('Sign-in successful!')
+      selected_page = 'Profile'
+    else:
+      st.error('Incorrect credentials.')
+
+# Profile screen
+elif selected_page == 'Profile':
+  st.title('Profile')
+
+  # Display profile information for logged-in user
+  if st.session_state.get('logged_in'):
+    # Retrieve user information from CSV based on logged-in user's email
+    user_info = existing_users[existing_users['Email'] ==
+                               st.session_state['email']]
+    user_photo = user_info['Photo'].values[0]
+    user_name = user_info['Name'].values[0]
+    user_email = user_info['Email'].values[0]
+
+    # Display user's photo, name, and email
+    st.image(user_photo)
+    st.write(f"Name: {user_name}")
+    st.write(f"Email: {user_email}")
+
+  st.sidebar.title('HappyMe')
+  selected_page_1 = st.sidebar.radio('Navigation',
+                                     ['Profile', 'Dashboard', 'History'])
+  #NEW SIDEBAR NAVIGATION
+  # Define the filename for the history CSV
+  history_file = 'History.csv'
+  # Profile screen
+  if selected_page_1 == 'Profile':
+
+    # Display profile information for logged-in user
+    if st.session_state.get('logged_in'):
+      # Retrieve user information from CSV based on logged-in user's email
+      user_info = existing_users[existing_users['Email'] ==
+                                 st.session_state['email']]
+      user_photo = user_info['Photo'].values[0]
+      user_name = user_info['Name'].values[0]
+      user_email = user_info['Email'].values[0]
+
+      # Display user's photo, name, and email
+      st.image(user_photo)
+      st.write(f"Name: {user_name}")
+      st.write(f"Email: {user_email}")
+
+  # Dashboard screen
+  elif selected_page_1 == 'Dashboard':
+    st.title('Dashboard')
+    TSSM = st.text_input('Enter Time Spent on Social Media:')
+
+    if st.button('Make Prediction'):
+      user_info = existing_users[existing_users['Email'] ==
+                                 st.session_state['mail']]
+      DOB = user_info['DOB'].values[0]
+      prediction = make_prediction(float(TSSM), DOB)
+      advice = generate_advice(prediction)
+
+      st.write(f"Predicted Mental State Category: {prediction}")
+      st.write(f"Advice: {advice}")
+
+      # Prepare the data to be stored in the History CSV
+      current_data = {
+          'Date': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S'),
+          'Mental_State_Category': prediction,
+          'Advice': advice,
+      }
+
+      # Check if the History file already exists
+      if not os.path.exists(history_file):
+        # If the file doesn't exist, create a new CSV and save the current data
+        history_df = pd.DataFrame([current_data])
+        history_df.to_csv(history_file, index=False)
+      else:
+        # If the file exists, load the existing data, append the current data, and save it
+        history_df = pd.read_csv(history_file)
+        history_df = history_df.append(current_data, ignore_index=True)
+        history_df.to_csv(history_file, index=False)
+
+        st.write("Data saved to History file.")
+
+  # History screen
+  elif selected_page_1 == 'History':
+    st.title('History')
+    # Retrieve historical data from CSV file
+    df = pd.read_csv(history_file)
+    df['Date'] = pd.to_datetime(df['Date'])
+    df.set_index('Date', inplace=True)
+    # Display historical data
+    st.subheader('Historical Data')
+    st.table(df)
+  else:
+    st.warning('Please sign in to access your profile.')
